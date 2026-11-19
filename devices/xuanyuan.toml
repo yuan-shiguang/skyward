@@ -4,7 +4,6 @@ brand = "Xiaomi"
 model = "Xiaomi 15 Ultra"
 ab = true
 soc = { hans = "骁龙®8至尊版移动平台", hant = "Snapdragon® 8 Elite 行動平台", en = "Snapdragon® 8 Elite Mobile Platform" }
-os_version_prop = "ro.mi.os.version.incremental"
 
 [display]
 # The panel's own mode, persist.sys.miui_default_resolution in the odm

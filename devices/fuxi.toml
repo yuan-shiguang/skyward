@@ -4,7 +4,6 @@ brand = "Xiaomi"
 model = "Xiaomi 13"
 ab = true
 soc = { hans = "第二代骁龙®8移动平台", hant = "Snapdragon® 8 Gen 2 行動平台", en = "Snapdragon® 8 Gen 2 Mobile Platform" }
-os_version_prop = "ro.mi.os.version.incremental"
 
 [display]
 # persist.sys.miui_resolution in the odm partition's build.prop.

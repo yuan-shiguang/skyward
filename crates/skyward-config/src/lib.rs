@@ -3,6 +3,15 @@ use serde::Deserialize;
 use std::collections::HashMap;
 use std::path::Path;
 
+/// The installed system's build properties that Skyward reads at runtime.
+/// The device configuration no longer names them: every system keeps its
+/// own version here, in the build.prop files of its mounted partitions.
+/// These are the `ro.system.build.*` keys the stock system sets.
+/// The system's own version number, such as `V13.0.5.0.SGICNXM`.
+pub const OS_VERSION_PROP: &str = "ro.system.build.version.incremental";
+/// The Android version the system is built on, such as `12`.
+pub const ANDROID_VERSION_PROP: &str = "ro.system.build.version.release";
+
 /// Recovery ramdisk files Skyward reads, adds or changes, as archive paths
 /// (they sit under `/` once the kernel unpacks the ramdisk).
 pub mod ramdisk {
@@ -268,9 +277,6 @@ pub struct Device {
     /// SoC marketing name shown on the About page.
     #[serde(default)]
     pub soc: Option<Names>,
-    /// System property that carries the vendor OS version.
-    #[serde(default = "default_os_version_prop")]
-    pub os_version_prop: String,
 }
 
 #[derive(Debug, Clone, Default, Deserialize)]
@@ -464,10 +470,6 @@ fn default_true() -> bool {
     true
 }
 
-fn default_os_version_prop() -> String {
-    "ro.build.display.id".into()
-}
-
 fn default_module_sources() -> Vec<String> {
     vec!["vendor_boot".into(), "vendor_dlkm".into(), "vendor".into()]
 }
@@ -621,7 +623,6 @@ mod tests {
         let cfg = DeviceConfig::parse("[device]\ncodename = \"nezha\"\n").unwrap();
         assert_eq!(cfg.device.codename, "nezha");
         assert!(cfg.device.ab);
-        assert_eq!(cfg.device.os_version_prop, "ro.build.display.id");
         assert_eq!(cfg.modules.sources, default_module_sources());
         assert!(cfg.modules.load.is_empty());
         assert_eq!((cfg.firmware, cfg.wlan, cfg.update), (None, None, None), "a phone may have none of them");
@@ -687,7 +688,6 @@ mod tests {
     fn parses_nezha() {
         let cfg = DeviceConfig::parse(include_str!("../../../devices/nezha.toml")).unwrap();
         assert_eq!(cfg.device.codename, "nezha");
-        assert_eq!(cfg.device.os_version_prop, "ro.mi.os.version.incremental");
         let soc = cfg.device.soc.expect("nezha names its SoC");
         assert_eq!(soc.hans, "第五代骁龙®8至尊版移动平台");
         assert_eq!(soc.en, "Snapdragon® 8 Elite Gen 5 Mobile Platform");

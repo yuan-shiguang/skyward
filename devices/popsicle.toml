@@ -4,7 +4,6 @@ brand = "Xiaomi"
 model = "Xiaomi 17 Pro Max"
 ab = true
 soc = { hans = "第五代骁龙®8至尊版移动平台", hant = "Snapdragon® 8 Elite Gen 5 行動平台", en = "Snapdragon® 8 Elite Gen 5 Mobile Platform" }
-os_version_prop = "ro.mi.os.version.incremental"
 
 [display]
 # persist.sys.miui_resolution in the odm partition's build.prop.

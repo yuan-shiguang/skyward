@@ -1,5 +1,5 @@
 use anyhow::{anyhow, bail, Context, Result};
-use skyward_config::DeviceConfig;
+use skyward_config::{DeviceConfig, ANDROID_VERSION_PROP, OS_VERSION_PROP};
 use skyward_sys::{prop, ToldOnce};
 use skyward_vab::{Slot, SnapshotState};
 use std::collections::HashMap;
@@ -163,8 +163,8 @@ pub fn collect_with(cfg: &DeviceConfig, battery: Option<Battery>) -> Result<Devi
         ram_kib: mem_total(&read("/proc/meminfo")?)?,
         panel: (d.width > 0 && d.height > 0).then_some((d.width, d.height)),
         screen: d.diagonal,
-        os_version: system.get(&cfg.device.os_version_prop),
-        android: system.get("ro.build.version.release"),
+        os_version: system.get(OS_VERSION_PROP).or_else(|| system.get("ro.build.version.incremental")),
+        android: system.get(ANDROID_VERSION_PROP).or_else(|| system.get("ro.build.version.release")),
         locale: system.get("ro.product.locale"),
         security_patch: system.get("ro.build.version.security_patch").map(|s| s.parse()).transpose()?,
         kernel: kernel_release()?,

@@ -4,7 +4,6 @@ brand = "Xiaomi"
 model = "Xiaomi 14 Ultra"
 ab = true
 soc = { hans = "第三代骁龙®8移动平台", hant = "Snapdragon® 8 Gen 3 行動平台", en = "Snapdragon® 8 Gen 3 Mobile Platform" }
-os_version_prop = "ro.mi.os.version.incremental"
 
 [display]
 # The panel's own mode, persist.sys.miui_default_resolution in the odm

@@ -1022,14 +1022,24 @@ fn wlan_worker(w: &Option<wlan::Worker>) -> Result<&wlan::Worker> {
 }
 
 /// The installed system, as the update server is told of it.
-fn installed(cfg: &DeviceConfig, info: &skyward_info::DeviceInfo) -> Result<Installed> {
+fn installed(info: &skyward_info::DeviceInfo) -> Result<Installed> {
     let slot = info.slot.context("only an A/B phone is updated")?;
     let props = skyward_info::installed_props(slot)?;
     let prop = |name: &str| props.get(name).cloned().with_context(|| format!("the installed system says no {name}"));
+    let version = props
+        .get(skyward_config::OS_VERSION_PROP)
+        .or_else(|| props.get("ro.build.version.incremental"))
+        .cloned()
+        .with_context(|| format!("the installed system says no {}", skyward_config::OS_VERSION_PROP))?;
+    let android = props
+        .get(skyward_config::ANDROID_VERSION_PROP)
+        .or_else(|| props.get("ro.build.version.release"))
+        .cloned()
+        .with_context(|| format!("the installed system says no {}", skyward_config::ANDROID_VERSION_PROP))?;
     Ok(Installed {
         device: prop("ro.product.mod_device")?,
-        version: prop(&cfg.device.os_version_prop)?,
-        android: prop("ro.build.version.release")?,
+        version,
+        android,
         unlocked: skyward_block::boot_param("androidboot.flash.locked")?.as_deref() == Some("0"),
     })
 }
@@ -1346,7 +1356,7 @@ impl<'a> Pages<'a> {
         // page to name the one that starts, once a switch cut off before is
         // finished.
         let systems_worker = match app.state.dual_boot {
-            true => Some(systems::Worker::start(cfg.device.os_version_prop.clone())?),
+            true => Some(systems::Worker::start()?),
             false => None,
         };
         // fastbootd may write the boot partitions, which the installed system's
@@ -2942,7 +2952,7 @@ impl Pages<'_> {
         ensure!(self.checker.is_none(), "the update server is being asked already");
         let server = self.cfg.update.as_ref().context("the phone's update server is not known")?.server.clone();
         let probe = self.cfg.wlan.as_ref().context("the phone's WLAN is not brought up")?.probe.clone();
-        match installed(self.cfg, &self.info) {
+        match installed(&self.info) {
             Ok(installed) => {
                 self.checker = Some(updates::Worker::start(updates::Task::Check { server, probe, installed }, self.servers.clone())?)
             }
@@ -2956,7 +2966,7 @@ impl Pages<'_> {
         ensure!(self.downloader.is_none(), "the full package is being downloaded already");
         let server = self.cfg.update.as_ref().context("the phone's update server is not known")?.server.clone();
         let path = downloaded(&release);
-        match installed(self.cfg, &self.info) {
+        match installed(&self.info) {
             Ok(installed) => {
                 let task = updates::Task::Download { server, installed, release, path };
                 self.downloader = Some(updates::Worker::start(task, self.servers.clone())?);

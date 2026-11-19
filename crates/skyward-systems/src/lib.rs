@@ -52,13 +52,17 @@ pub struct Other {
 /// What the installed system calls itself, by its properties: HyperOS by
 /// the major version Xiaomi gives it, any other by its Android version;
 /// with the build it is, where it says.
-pub fn installed_name(props: &HashMap<String, String>, version_prop: &str) -> Named {
-    let name = match (props.get("ro.mi.os.version.code"), props.get("ro.build.version.release")) {
+pub fn installed_name(props: &HashMap<String, String>) -> Named {
+    let name = match (props.get("ro.mi.os.version.code"), props.get("ro.system.build.version.release").or_else(|| props.get("ro.build.version.release"))) {
         (Some(code), _) => format!("HyperOS {code}"),
         (None, Some(release)) => format!("Android {release}"),
         (None, None) => "Android".into(),
     };
-    let version = props.get(version_prop).or_else(|| props.get("ro.build.display.id")).cloned();
+    let version = props
+        .get("ro.system.build.version.incremental")
+        .or_else(|| props.get("ro.build.version.incremental"))
+        .or_else(|| props.get("ro.build.display.id"))
+        .cloned();
     Named { name, version }
 }
 
@@ -72,11 +76,20 @@ mod tests {
 
     #[test]
     fn the_installed_system_is_named_as_it_names_itself() {
-        let hyper = props(&[("ro.mi.os.version.code", "3"), ("ro.build.version.release", "16"), ("ro.mi.os.version.incremental", "OS3.0.308.0.WMACNXM")]);
-        assert_eq!(installed_name(&hyper, "ro.mi.os.version.incremental"), Named { name: "HyperOS 3".into(), version: Some("OS3.0.308.0.WMACNXM".into()) });
-        let custom = props(&[("ro.build.version.release", "16"), ("ro.build.display.id", "lineage_ishtar-userdebug 16 BP2A")]);
+        let hyper = props(&[
+            ("ro.mi.os.version.code", "3"),
+            ("ro.system.build.version.release", "16"),
+            ("ro.system.build.version.incremental", "OS3.0.308.0.WMACNXM"),
+        ]);
+        assert_eq!(installed_name(&hyper), Named { name: "HyperOS 3".into(), version: Some("OS3.0.308.0.WMACNXM".into()) });
+        let release_only = props(&[("ro.build.version.release", "16"), ("ro.build.version.incremental", "OS3.0.308.0.WMACNXM")]);
         assert_eq!(
-            installed_name(&custom, "ro.mi.os.version.incremental"),
+            installed_name(&release_only),
+            Named { name: "Android 16".into(), version: Some("OS3.0.308.0.WMACNXM".into()) }
+        );
+        let custom = props(&[("ro.system.build.version.release", "16"), ("ro.build.display.id", "lineage_ishtar-userdebug 16 BP2A")]);
+        assert_eq!(
+            installed_name(&custom),
             Named { name: "Android 16".into(), version: Some("lineage_ishtar-userdebug 16 BP2A".into()) }
         );
     }

@@ -46,11 +46,12 @@ pub fn next_slot() -> Result<Slot> {
 }
 
 /// The systems as they are now: the installed one named by its build's
-/// properties, its version by `version_prop`, whether its vendor_boot or
-/// dtbo in the slot that starts next changed since the second system was
-/// installed, and what the boot partitions hold, which are those of the
-/// slot the phone started from where nothing is kept of them.
-fn read(version_prop: &str) -> Result<Overview> {
+/// properties, its version from the system's own build.prop, whether its
+/// vendor_boot or dtbo in the slot that starts next changed since the
+/// second system was installed, and what the boot partitions hold, which
+/// are those of the slot the phone started from where nothing is kept of
+/// them.
+fn read() -> Result<Overview> {
     let current = skyward_vab::current_slot()?.context("not an A/B phone")?;
     let props = skyward_info::installed_props(current)?;
     let state = install::state()?;
@@ -59,7 +60,7 @@ fn read(version_prop: &str) -> Result<Overview> {
         None => false,
     };
     let held = install::held(&state, current)?;
-    Ok(install::overview(&state, skyward_systems::installed_name(&props, version_prop), changed, held))
+    Ok(install::overview(&state, skyward_systems::installed_name(&props), changed, held))
 }
 
 /// The system whose boot set is in the boot partitions.
@@ -113,9 +114,9 @@ pub struct Worker {
 }
 
 impl Worker {
-    /// Start the thread; `version_prop` is the build property naming the
-    /// installed system's version, as the phone's configuration says.
-    pub fn start(version_prop: String) -> Result<Worker> {
+    /// Start the thread. The installed system's version comes from its own
+    /// build.prop, read when the systems are read.
+    pub fn start() -> Result<Worker> {
         let (tasks, todo) = mpsc::channel::<Task>();
         let worker = skyward_sys::worker::Worker::start("systems", move |tell| {
             for task in todo {
@@ -132,7 +133,7 @@ impl Worker {
                 if let Some(event) = told {
                     tell.tell(event);
                 }
-                tell.tell(Event::Read(read(&version_prop).map_err(|e| format!("{e:#}"))));
+                tell.tell(Event::Read(read().map_err(|e| format!("{e:#}"))));
             }
         })?;
         Ok(Worker { tasks, pending: 0, worker })
