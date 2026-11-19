@@ -56,8 +56,12 @@ pub enum BootControl<'a> {
 }
 
 /// The slot the bootloader starts next, as the running boot control tells
-/// it.
+/// it. A phone without slots has one set of partitions, which is always the
+/// one that starts, so the boot control is not asked.
 pub fn next_slot() -> Result<Slot> {
+    if !crate::is_ab() {
+        return Ok(Slot::Single);
+    }
     let (binder, hardware) = (Binder::open()?, Binder::hardware()?);
     let control = BootControl::open(&binder, &hardware)?;
     control.active()

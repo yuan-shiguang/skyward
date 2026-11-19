@@ -178,14 +178,17 @@ pub fn device(dir: &Path, name: &str, slot: Slot) -> PathBuf {
     dir.join(format!("{name}{}", slot.suffix()))
 }
 
-/// The partitions `kind` fits that this phone has in both slots, among the
-/// links in `dir`, the likeliest first.
-pub fn partitions(kind: ImageKind, dir: &Path) -> Result<Vec<&'static str>> {
+/// The partitions `kind` fits that this phone has in every slot it has,
+/// among the links in `dir`, the likeliest first. On an A/B phone a
+/// partition is offered only where both slots hold it; on an A-only phone
+/// the one unsuffixed link is enough.
+pub fn partitions(kind: ImageKind, dir: &Path, slot: Slot) -> Result<Vec<&'static str>> {
+    let slots: &[Slot] = if slot.is_ab() { &[Slot::A, Slot::B] } else { &[Slot::Single] };
     let mut found = Vec::new();
     for name in kind.partitions() {
         let mut has = true;
-        for slot in [Slot::A, Slot::B] {
-            let path = device(dir, name, slot);
+        for &s in slots {
+            let path = device(dir, name, s);
             has &= path.try_exists().with_context(|| format!("look for {}", path.display()))?;
         }
         if has {
@@ -415,9 +418,20 @@ mod tests {
             std::fs::File::create(dir.path().join(name)).unwrap();
         }
         let both = ImageKind::Boot { kernel: true, ramdisk: Ramdisk::Recovery };
-        assert_eq!(partitions(both, dir.path()).unwrap(), ["recovery", "boot"]);
-        assert_eq!(partitions(ImageKind::Vbmeta, dir.path()).unwrap(), ["vbmeta"]);
-        assert!(partitions(ImageKind::Dtbo, dir.path()).unwrap().is_empty());
+        assert_eq!(partitions(both, dir.path(), Slot::A).unwrap(), ["recovery", "boot"]);
+        assert_eq!(partitions(ImageKind::Vbmeta, dir.path(), Slot::A).unwrap(), ["vbmeta"]);
+        assert!(partitions(ImageKind::Dtbo, dir.path(), Slot::A).unwrap().is_empty());
+    }
+
+    #[test]
+    fn a_phone_without_slots_needs_only_one_unsuffixed_partition() {
+        let dir = tempfile::tempdir().unwrap();
+        for name in ["boot", "recovery", "vbmeta"] {
+            std::fs::File::create(dir.path().join(name)).unwrap();
+        }
+        let boot = ImageKind::Boot { kernel: true, ramdisk: Ramdisk::Recovery };
+        assert_eq!(partitions(boot, dir.path(), Slot::Single).unwrap(), ["recovery", "boot"]);
+        assert_eq!(partitions(ImageKind::Vbmeta, dir.path(), Slot::Single).unwrap(), ["vbmeta"]);
     }
 
     /// A partition of `size` bytes filled with 0xAA, so untouched bytes

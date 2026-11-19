@@ -89,7 +89,16 @@ fn map_and_mount(p: &Partition, devices: &[(u32, u32)], slot: Slot) -> Result<Mo
 fn slot_partitions(md: &Metadata, slot: Slot) -> Vec<&Partition> {
     md.partitions
         .iter()
-        .filter(|p| p.name.ends_with(slot.suffix()) && !p.extents.is_empty() && p.attributes & ATTR_DISABLED == 0)
+        .filter(|p| {
+            p.name.ends_with(slot.suffix())
+                // Copy-on-write partitions such as system-cow hold an
+                // update's changes, not the slot's own data. With an empty
+                // suffix they would match every partition, so leave them
+                // out explicitly.
+                && !p.name.ends_with("-cow")
+                && !p.extents.is_empty()
+                && p.attributes & ATTR_DISABLED == 0
+        })
         .collect()
 }
 

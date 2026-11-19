@@ -18,8 +18,14 @@ pub use snapshots::Merge;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Slot {
+    /// A device with A/B slots, the first of them.
     A,
+    /// A device with A/B slots, the second of them.
     B,
+    /// A device without slots: one set of unsuffixed partitions, the only
+    /// one there is. Its suffix is empty, so every partition keeps its base
+    /// name, and it is its own "other" slot, since there is no second one.
+    Single,
 }
 
 impl Slot {
@@ -27,6 +33,7 @@ impl Slot {
         match self {
             Slot::A => "_a",
             Slot::B => "_b",
+            Slot::Single => "",
         }
     }
 
@@ -34,14 +41,17 @@ impl Slot {
         match self {
             Slot::A => "A",
             Slot::B => "B",
+            Slot::Single => "",
         }
     }
 
-    /// The slot's metadata copy in super.
+    /// The slot's metadata copy in super. A single-slot device has one
+    /// metadata copy, numbered 0.
     pub fn number(self) -> u32 {
         match self {
             Slot::A => 0,
             Slot::B => 1,
+            Slot::Single => 0,
         }
     }
 
@@ -49,17 +59,47 @@ impl Slot {
         match self {
             Slot::A => Slot::B,
             Slot::B => Slot::A,
+            Slot::Single => Slot::Single,
         }
+    }
+
+    /// Whether the device this slot belongs to has two slots.
+    pub fn is_ab(self) -> bool {
+        !matches!(self, Slot::Single)
     }
 
     pub fn from_suffix(s: &str) -> Option<Slot> {
         match s {
             "_a" => Some(Slot::A),
             "_b" => Some(Slot::B),
+            // An A-only device reports no slot suffix; the empty one names
+            // its single partition set.
+            "" => Some(Slot::Single),
             _ => None,
         }
     }
 }
+
+/// A device's partition layout, from `ab` in its configuration. Set once at
+/// start-up so that every [`current_slot`] call resolves the same way,
+/// whether the device has two slots or one unsuffixed set.
+mod layout {
+    use std::sync::OnceLock;
+
+    static AB: OnceLock<bool> = OnceLock::new();
+
+    /// Set the layout from the device configuration. The first call wins;
+    /// later ones are ignored.
+    pub fn set(ab: bool) {
+        let _ = AB.set(ab);
+    }
+
+    pub fn is_ab() -> bool {
+        *AB.get().unwrap_or(&true)
+    }
+}
+
+pub use layout::{is_ab, set as set_ab};
 
 /// What the phone's boot control holds of the slots.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -72,8 +112,14 @@ pub struct BootSlots {
     pub successful: [bool; 2],
 }
 
-/// The booted slot, or `None` on devices that are not A/B.
+/// The slot this device runs from. On an A/B device it is the slot named by
+/// the kernel's `androidboot.slot_suffix`, or `None` before the bootloader
+/// has set one. On a device configured without slots it is always
+/// [`Slot::Single`], the one unsuffixed set of partitions.
 pub fn current_slot() -> Result<Option<Slot>> {
+    if !layout::is_ab() {
+        return Ok(Some(Slot::Single));
+    }
     match skyward_block::slot_suffix()? {
         None => Ok(None),
         Some(s) => Slot::from_suffix(&s).map(Some).ok_or_else(|| anyhow!("slot suffix {s:?}")),
@@ -405,6 +451,17 @@ mod tests {
         assert_eq!(Slot::B.letter(), "B");
         assert_eq!((Slot::A.number(), Slot::B.number()), (0, 1));
         assert_eq!(Slot::from_suffix("_c"), None);
+    }
+
+    #[test]
+    fn a_single_slot_is_its_own_other_and_has_no_suffix() {
+        assert_eq!(Slot::from_suffix(""), Some(Slot::Single));
+        assert_eq!(Slot::Single.suffix(), "");
+        assert_eq!(Slot::Single.letter(), "");
+        assert_eq!(Slot::Single.number(), 0);
+        assert_eq!(Slot::Single.other(), Slot::Single);
+        assert!(!Slot::Single.is_ab());
+        assert!(Slot::A.is_ab() && Slot::B.is_ab());
     }
 
     fn encoded(state: UpdateState) -> Vec<u8> {

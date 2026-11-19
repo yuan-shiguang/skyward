@@ -37,8 +37,9 @@ pub fn check(image: &[u8], codename: &str) -> Result<()> {
 /// build goes into, slot A first: `next`, the slot that starts next, and
 /// any other whose partition holds Skyward now, any build of it.
 pub fn slots(dir: &Path, next: Slot) -> Result<Vec<Slot>> {
+    let candidates: &[Slot] = if next.is_ab() { &[Slot::A, Slot::B] } else { &[Slot::Single] };
     let mut slots = Vec::new();
-    for slot in [Slot::A, Slot::B] {
+    for &slot in candidates {
         let path = image::device(dir, PARTITION, slot);
         let mut file = File::open(&path).with_context(|| format!("open {}", path.display()))?;
         image::drop_cache(&file).with_context(|| format!("drop the cached pages of {}", path.display()))?;

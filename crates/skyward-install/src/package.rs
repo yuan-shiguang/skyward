@@ -139,12 +139,23 @@ pub struct Build {
     pub security_patch: String,
 }
 
-/// Whether `update` may go on `phone`.
+/// Whether `update` may go on `phone`, whose device has A/B slots when
+/// `ab` is true.
 pub fn check(update: &Update, phone: &Phone) -> Result<(), Refusal> {
+    check_with(update, phone, skyward_vab::is_ab())
+}
+
+fn check_with(update: &Update, phone: &Phone, ab: bool) -> Result<(), Refusal> {
     let m = &update.metadata;
     let kind = m.get("ota-type").unwrap_or_default();
-    if kind != "AB" {
-        return Err(Refusal::NotAb(kind.to_string()));
+    // An A/B phone takes a package written for slots. A phone without them
+    // takes a traditional, non-A/B package, which names no slot type.
+    if ab {
+        if kind != "AB" {
+            return Err(Refusal::NotAb(kind.to_string()));
+        }
+    } else if kind == "AB" {
+        return Err(Refusal::Ab(kind.to_string()));
     }
     let devices = m.get("pre-device").unwrap_or_default();
     if !listed(&phone.device, devices) {
@@ -231,6 +242,15 @@ METADATA_SIZE=1024
     #[test]
     fn a_full_package_for_this_phone_is_accepted() {
         assert_eq!(check(&update_with(METADATA_TEXT, PROPERTIES_TEXT), &phone()), Ok(()));
+    }
+
+    #[test]
+    fn a_phone_without_slots_takes_a_non_ab_package_only() {
+        let block = METADATA_TEXT.replace("ota-type=AB", "ota-type=BLOCK");
+        let no_type = METADATA_TEXT.replace("ota-type=AB\n", "");
+        assert_eq!(check_with(&update_with(&block, PROPERTIES_TEXT), &phone(), false), Ok(()));
+        assert_eq!(check_with(&update_with(&no_type, PROPERTIES_TEXT), &phone(), false), Ok(()));
+        assert_eq!(check_with(&update_with(METADATA_TEXT, PROPERTIES_TEXT), &phone(), false), Err(Refusal::Ab("AB".into())));
     }
 
     #[test]

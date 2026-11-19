@@ -51,6 +51,9 @@ impl Pick {
         match self {
             Pick::Current => vec![current],
             Pick::Other => vec![current.other()],
+            // A phone without slots has one unsuffixed partition set, so
+            // "both" and "the other" mean that one and there is no second.
+            Pick::Both if !current.is_ab() => vec![current],
             Pick::Both => vec![Slot::A, Slot::B],
         }
     }

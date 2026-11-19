@@ -780,7 +780,8 @@ fn lines(from: impl Read, mut each: impl FnMut(&str) -> io::Result<()>) -> io::R
 
 fn flash_image(ctx: &Context, kind: ImageKind, size: u64) -> Result<Done> {
     let dir = Path::new(skyward_block::BY_NAME);
-    let partitions = image::partitions(kind, dir)?;
+    let slot = skyward_vab::current_slot()?.context("not an A/B phone")?;
+    let partitions = image::partitions(kind, dir, slot)?;
     if partitions.is_empty() {
         return Ok(Done::Decided(Outcome::Refused(Refusal::NoPartition)));
     }

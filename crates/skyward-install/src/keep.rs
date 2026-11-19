@@ -35,11 +35,18 @@ impl Kept {
     /// slot does not hold Skyward, as when it was started without being
     /// flashed.
     pub fn hold(dir: &Path, current: Slot) -> Result<Option<Kept>> {
+        // A phone without slots keeps Skyward in one recovery partition,
+        // which an install writes over as it would any other image; there
+        // is no second copy to put it back into.
+        if !current.is_ab() {
+            return Ok(None);
+        }
         let (a, image_a) = read(&image::device(dir, PARTITION, Slot::A))?;
         let (b, image_b) = read(&image::device(dir, PARTITION, Slot::B))?;
         let (held, image) = match current {
             Slot::A => (a, image_a),
             Slot::B => (b, image_b),
+            Slot::Single => unreachable!(),
         };
         Ok(held.skyward.then(|| Kept { dir: dir.to_path_buf(), image, own: held.digest, before: [a, b] }))
     }

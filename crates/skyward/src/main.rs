@@ -241,6 +241,7 @@ fn main() -> Result<()> {
         Cmd::Modules { source } => modules(&source),
         Cmd::Load { config, names } => {
             let cfg = DeviceConfig::load(&config)?;
+            skyward_vab::set_ab(cfg.device.ab);
             let names = if names.is_empty() { cfg.modules.load.clone() } else { names };
             for path in load_modules(&cfg, &names)? {
                 println!("{}", path.display());
@@ -287,9 +288,11 @@ fn main() -> Result<()> {
         Cmd::Umount => skyward_vab::unmount_partitions(booted_slot()?),
         #[cfg(target_os = "android")]
         Cmd::Services { config } => {
+            let cfg = DeviceConfig::load(&config)?;
+            skyward_vab::set_ab(cfg.device.ab);
             let slot = booted_slot()?;
             let props = skyward_info::installed_props(slot)?;
-            let services: Vec<Started> = DeviceConfig::load(&config)?.services.into_iter().filter(|s| s.runs_on(&props)).map(Started::from).collect();
+            let services: Vec<Started> = cfg.services.into_iter().filter(|s| s.runs_on(&props)).map(Started::from).collect();
             let libraries = secure::libraries()?;
             services::start(&services, libraries.as_deref())?;
             keys::start(&keys::found(slot, libraries.as_deref())?.steps?)?;
@@ -438,6 +441,7 @@ fn main() -> Result<()> {
         #[cfg(target_os = "android")]
         Cmd::Ui { config, font, mono, unlock, dump } => {
             let cfg = DeviceConfig::load(&config)?;
+            skyward_vab::set_ab(cfg.device.ab);
             let start = if unlock { skyward_ui::app::Screen::Decrypt } else { skyward_ui::app::Screen::Home };
             // The programs the recovery service started for the phone's
             // keys are read from the partitions again, as it read them;
@@ -763,6 +767,7 @@ fn recovery() -> Result<()> {
             bcb::clear(&misc)?;
         }
         let cfg = DeviceConfig::load(Path::new("/").join(ramdisk::CONFIG))?;
+        skyward_vab::set_ab(cfg.device.ab);
         skyward_sys::kmsg(&format!(
             "{} {} recovery up, misc command {:?} args {:?}, asking for {:?}",
             cfg.device.codename,
@@ -866,6 +871,7 @@ fn prepare(cfg: &DeviceConfig, slot: skyward_vab::Slot) -> Result<Vec<skyward_co
 
 fn info(config: &str) -> Result<()> {
     let cfg = DeviceConfig::load(config)?;
+    skyward_vab::set_ab(cfg.device.ab);
     let i = skyward_info::collect(&cfg)?;
     println!("model         = {} ({})", i.model, i.codename);
     println!("soc           = {:?}", i.soc);
@@ -882,6 +888,7 @@ fn info(config: &str) -> Result<()> {
     println!("boot          = {:?}", i.boot);
     println!("recovery      = {}", skyward_info::VERSION);
     match i.slot {
+        Some(s) if !s.is_ab() => println!("current_slot  = (no slots: single)"),
         Some(s) => println!("current_slot  = {}", s.suffix()),
         None => println!("current_slot  = (not A/B)"),
     }
@@ -930,11 +937,12 @@ fn identify(path: &Path) -> Result<()> {
 
 fn slot() -> Result<()> {
     match skyward_vab::current_slot()? {
+        Some(s) if !s.is_ab() => println!("(no slots: {})", s.suffix()),
         Some(s) => println!("{}", s.suffix()),
         None => println!("(not A/B)"),
     }
     #[cfg(target_os = "android")]
-    {
+    if skyward_vab::is_ab() {
         use skyward_vab::boot::BootControl;
         let (binder, hardware) = (skyward_binder::driver::Binder::open()?, skyward_binder::driver::Binder::hardware()?);
         let opened = BootControl::open(&binder, &hardware);
