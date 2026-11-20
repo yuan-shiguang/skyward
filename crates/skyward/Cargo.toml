@@ -24,6 +24,9 @@ skyward-lp = { path = "../skyward-lp" }
 tempfile = "3.27.0"
 zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 zstd = { version = "0.14.3", default-features = false }
+# `themes` is compiled under `cfg(test)` on the host, where the Android-only
+# target dependency below is not linked; its tests need these types too.
+skyward-ui = { path = "../skyward-ui" }
 
 [target.'cfg(target_os = "android")'.dependencies]
 evdev = "0.13.2"

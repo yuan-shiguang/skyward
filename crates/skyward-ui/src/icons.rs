@@ -432,12 +432,16 @@ impl Bitmap {
         let (side, count) = (info.width, info.width as usize * info.height as usize);
         let pixels: Vec<Rgba> = match info.color_type {
             png::ColorType::Rgba => raw[..info.buffer_size()]
-                .chunks_exact(4)
+                .as_chunks::<4>()
+                .0
+                .iter()
                 .take(count)
                 .map(|p| Rgba { r: p[0], g: p[1], b: p[2], a: p[3] })
                 .collect(),
             png::ColorType::Rgb => raw[..info.buffer_size()]
-                .chunks_exact(3)
+                .as_chunks::<3>()
+                .0
+                .iter()
                 .take(count)
                 .map(|p| Rgba { r: p[0], g: p[1], b: p[2], a: 255 })
                 .collect(),
