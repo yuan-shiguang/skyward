@@ -1,10 +1,11 @@
-use anyhow::{ensure, Context, Result};
+use anyhow::{bail, ensure, Context, Result};
 use clap::{Parser, Subcommand};
 use sha2::{Digest, Sha256};
 use skyward_config::ramdisk as paths;
 use std::fs::File;
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 mod avb;
 mod described;
@@ -75,8 +76,9 @@ enum Cmd {
     /// name=value: its version, where its full update package is, and the
     /// SHA-256 of the recovery partition in that package. Given somewhere
     /// to write it, also take that partition out of the package on its
-    /// server, reading only what the partition takes, and write it there
-    /// once its SHA-256 is that one.
+    /// server and write it there once its SHA-256 is that one. A slotless
+    /// device's fastboot tar is streamed only as far as the image, while a
+    /// zip is downloaded in full for its directory.
     Stock {
         /// The device configuration, devices/<codename>.toml.
         #[arg(long)]
@@ -173,10 +175,15 @@ fn main() -> Result<()> {
             write(&out, &img, &avb::footed(&bytes, "recovery", size, &Sha256::digest(&bytes))?)
         }
         Cmd::Stock { config, out } => {
-            let stock = skyward_config::DeviceConfig::load(&config)?.stock.with_context(|| format!("{} names no stock build", config.display()))?;
+            let cfg = skyward_config::DeviceConfig::load(&config)?;
+            let stock = cfg.stock.as_ref().with_context(|| format!("{} names no stock build", config.display()))?;
             println!("version={}\npackage={}\nrecovery={}", stock.version, stock.package, stock.recovery);
             match out {
-                Some(out) => take_stock_recovery(&stock, &out),
+                // A device with slots takes its recovery out of the payload
+                // in the full OTA package. One without them has no payload:
+                // its recovery is a plain image in a fastboot package.
+                Some(out) if cfg.device.ab => take_stock_recovery(stock, &out),
+                Some(out) => take_stock_recovery_from_image(stock, &out),
                 None => Ok(()),
             }
         }
@@ -216,6 +223,130 @@ fn take_stock_recovery(stock: &skyward_config::Stock, out: &Path) -> Result<()> 
     ensure!(sum == stock.recovery, "the {RECOVERY} partition in {} has the SHA-256 {sum}, where the configuration names {}", stock.package, stock.recovery);
     std::fs::rename(&image.path, out).with_context(|| format!("move {} to {}", image.path.display(), out.display()))?;
     println!("wrote {} ({} bytes), its SHA-256 the one the configuration names", out.display(), image.size);
+    Ok(())
+}
+
+/// The recovery image as a package names it: at the top, or in `images` as
+/// a fastboot package has it.
+const RECOVERY_IMAGE: &str = "recovery.img";
+const IMAGES_RECOVERY: &str = "images/recovery.img";
+
+/// Whether a package entry is the recovery image.
+fn is_recovery_name(name: &str) -> bool {
+    name == RECOVERY || name == RECOVERY_IMAGE || name == IMAGES_RECOVERY || name.ends_with("/recovery.img")
+}
+
+/// Write `image` to `out` beside where it goes, checking its SHA-256 first
+/// so a wrong image never lands there. Returns the number of bytes written.
+fn write_checked<R: Read>(image: &mut R, name: &str, stock: &skyward_config::Stock, out: &Path) -> Result<u64> {
+    let parent = out.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    let work = tempfile::Builder::new().prefix(".stock").tempdir_in(parent).with_context(|| format!("make a folder in {}", parent.display()))?;
+    let staged = work.path().join("recovery.img");
+    let mut file = File::create(&staged).with_context(|| format!("create {}", staged.display()))?;
+    let mut hash = Sha256::new();
+    let mut buf = [0u8; 64 * 1024];
+    let mut size = 0u64;
+    loop {
+        let n = image.read(&mut buf).with_context(|| format!("read {name} out of {}", stock.package))?;
+        if n == 0 {
+            break;
+        }
+        hash.update(&buf[..n]);
+        file.write_all(&buf[..n]).with_context(|| format!("write {}", staged.display()))?;
+        size += n as u64;
+    }
+    file.flush().with_context(|| format!("flush {}", staged.display()))?;
+    let sum = hex::encode(hash.finalize());
+    ensure!(
+        sum == stock.recovery,
+        "the {name} image in {} has the SHA-256 {sum}, where the configuration names {}",
+        stock.package,
+        stock.recovery
+    );
+    std::fs::rename(&staged, out).with_context(|| format!("move {} to {}", staged.display(), out.display()))?;
+    Ok(size)
+}
+
+/// Take the recovery image out of an A-only device's package and write it to
+/// `out` once its SHA-256 is the one the configuration names. An OTA package
+/// is a zip that may carry `recovery.img` at its top; a fastboot package is a
+/// gzip-compressed tar with it under `images/`. Both are served over HTTPS.
+/// The fastboot tar is streamed and read only as far as that entry, so a
+/// several-gigabyte package need not be downloaded in full.
+fn take_stock_recovery_from_image(stock: &skyward_config::Stock, out: &Path) -> Result<()> {
+    let parent = out.parent().filter(|p| !p.as_os_str().is_empty()).unwrap_or(Path::new("."));
+    std::fs::create_dir_all(parent).with_context(|| format!("make {}", parent.display()))?;
+
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .http_status_as_error(false)
+        .user_agent(concat!("skyward-pack/", env!("CARGO_PKG_VERSION")))
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(60)))
+        .build()
+        .into();
+
+    if stock.package.ends_with(".zip") {
+        // A zip directory needs seeking, so take the package to a temporary
+        // file first, then read just the recovery entry out of it.
+        let work = tempfile::Builder::new().prefix(".stock").tempdir_in(parent).with_context(|| format!("make a folder in {}", parent.display()))?;
+        let package = work.path().join("package.zip");
+        let response = agent.get(&stock.package).call().with_context(|| format!("open {}", stock.package))?;
+        let status = response.status();
+        ensure!(status.is_success(), "the package answered {status}, where a download was expected");
+        let mut body = response.into_body();
+        let mut reader = body.with_config().limit(u64::MAX).reader();
+        let mut file = File::create(&package).with_context(|| format!("create {}", package.display()))?;
+        std::io::copy(&mut reader, &mut file).with_context(|| format!("download {}", stock.package))?;
+        file.flush().with_context(|| format!("flush {}", package.display()))?;
+        drop(file);
+
+        let archive = File::open(&package).with_context(|| format!("open {}", package.display()))?;
+        let mut zip = zip::ZipArchive::new(archive).with_context(|| format!("read the zip in {}", stock.package))?;
+        for i in 0..zip.len() {
+            let mut entry = zip.by_index(i).with_context(|| format!("read an entry in {}", stock.package))?;
+            let name = entry.name().to_string();
+            if !is_recovery_name(&name) {
+                continue;
+            }
+            println!("taking {name} out of the package");
+            let size = write_checked(&mut entry, &name, stock, out)?;
+            println!("took {name} out: {size} bytes");
+            return finish_image(out, size);
+        }
+        bail!("{} holds no {RECOVERY_IMAGE}", stock.package);
+    }
+
+    // Otherwise a fastboot package, a gzip-compressed tar. Stream it and
+    // stop at the recovery entry rather than read the whole archive.
+    let response = agent.get(&stock.package).call().with_context(|| format!("open {}", stock.package))?;
+    let status = response.status();
+    ensure!(status.is_success(), "the package answered {status}, where a download was expected");
+    let mut body = response.into_body();
+    let reader = body.with_config().limit(u64::MAX).reader();
+    let decoder = flate2::read::MultiGzDecoder::new(reader);
+    let mut archive = tar::Archive::new(decoder);
+    for entry in archive.entries().with_context(|| format!("read the tar in {}", stock.package))? {
+        let mut entry = entry.with_context(|| format!("read an entry in {}", stock.package))?;
+        let name = entry
+            .path()
+            .with_context(|| format!("name an entry in {}", stock.package))?
+            .to_string_lossy()
+            .into_owned();
+        if !entry.header().entry_type().is_file() || !is_recovery_name(&name) {
+            continue;
+        }
+        println!("taking {name} out of the fastboot package");
+        let size = write_checked(&mut entry, &name, stock, out)?;
+        println!("took {name} out: {size} bytes");
+        // No more of the tar is needed; drop the reader and connection.
+        return finish_image(out, size);
+    }
+    bail!("{} holds no {IMAGES_RECOVERY}", stock.package)
+}
+
+/// Say where the checked image was written.
+fn finish_image(out: &Path, size: u64) -> Result<()> {
+    println!("wrote {} ({size} bytes), its SHA-256 the one the configuration names", out.display());
     Ok(())
 }
 

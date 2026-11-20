@@ -2587,6 +2587,7 @@ version = "0.3.1"
 dependencies = [
  "anyhow",
  "clap",
+ "flate2",
  "hex",
  "rust-fs-core",
  "rust-fs-erofs",
@@ -2595,8 +2596,11 @@ dependencies = [
  "skyward-bootimg",
  "skyward-config",
  "skyward-programs",
+ "tar",
  "tempfile",
  "unpayload",
+ "ureq",
+ "zip 8.6.0",
 ]
 
 [[package]]

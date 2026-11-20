@@ -570,10 +570,19 @@ impl DeviceConfig {
         }
         if let Some(stock) = &cfg.stock {
             let name = stock.package.rsplit('/').next().unwrap_or_default();
+            // A device with slots takes its recovery from a payload in an
+            // OTA zip; one without them takes the image from a fastboot tgz
+            // or from a zip that carries recovery.img directly.
+            let is_package = if cfg.device.ab {
+                name.ends_with(".zip")
+            } else {
+                name.ends_with(".tgz") || name.ends_with(".zip")
+            };
             ensure!(
-                stock.package.starts_with("https://") && name.ends_with(".zip") && name.contains(&stock.version) && !stock.version.is_empty(),
-                "[stock] package: {} is not an HTTPS address of the full package of {}",
+                stock.package.starts_with("https://") && is_package && name.contains(&stock.version) && !stock.version.is_empty(),
+                "[stock] package: {} is not an HTTPS address of the {} full package of {}",
                 stock.package,
+                if cfg.device.ab { "OTA" } else { "fastboot" },
                 stock.version
             );
             ensure!(
@@ -798,9 +807,15 @@ mod tests {
             (include_str!("../../../devices/warsaw.toml"), "OS3.0.309.0.WHPCNXM"),
             (include_str!("../../../devices/dipper.toml"), "V12.5.2.0.QEACNXM"),
         ] {
-            let stock = DeviceConfig::parse(text).unwrap().stock.expect("a stock build to build on");
+            let cfg = DeviceConfig::parse(text).unwrap();
+            let stock = cfg.stock.as_ref().expect("a stock build to build on");
             assert_eq!(stock.version, version);
-            assert!(stock.package.ends_with(".zip") && stock.package.contains(&format!("/{version}/")), "{}", stock.package);
+            let package = if cfg.device.ab {
+                stock.package.ends_with(".zip")
+            } else {
+                stock.package.ends_with(".tgz") || stock.package.ends_with(".zip")
+            };
+            assert!(package && stock.package.contains(&format!("/{version}/")), "{}", stock.package);
         }
     }
 
@@ -816,6 +831,22 @@ mod tests {
         let other = ok.replace("version = \"OS1.0.1.0", "version = \"OS1.0.2.0");
         assert!(DeviceConfig::parse(&format!("{other}recovery = \"{hash}\"\n")).is_err(), "the package of another build");
         assert_eq!(DeviceConfig::parse("[device]\ncodename = \"x\"\n").unwrap().stock, None);
+    }
+
+    #[test]
+    fn an_a_only_stock_build_comes_from_a_fastboot_image() {
+        let hash = "faa425b10231a0cfe2d74ff34f344f032ee2d891ea5e9420bf4e67cd86d622a7";
+        let ok = format!(
+            "[device]\ncodename = \"x\"\nab = false\n[stock]\nversion = \"OS1.0.1.0.XXXCNXM\"\npackage = \"https://d.example/OS1.0.1.0.XXXCNXM/x_images_OS1.0.1.0.XXXCNXM_cn_0123456789.tgz\"\nrecovery = \"{hash}\"\n"
+        );
+        assert!(DeviceConfig::parse(&ok).is_ok(), "a fastboot tgz");
+        let zip = ok.replace(".tgz\"", ".zip\"");
+        assert!(DeviceConfig::parse(&zip).is_ok(), "a zip carrying recovery.img");
+        let other = ok.replace(".tgz\"", ".rar\"");
+        assert!(DeviceConfig::parse(&other).is_err(), "not a tgz or a zip");
+        // A device with slots takes the OTA zip instead.
+        let ab = ok.replace("ab = false", "ab = true").replace(".tgz\"", ".zip\"");
+        assert!(DeviceConfig::parse(&ab).is_ok());
     }
 
     #[test]

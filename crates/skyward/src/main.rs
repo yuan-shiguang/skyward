@@ -38,6 +38,9 @@ mod settings;
 #[cfg(target_os = "android")]
 mod systems;
 #[cfg(any(target_os = "android", test))]
+// The host test target compiles this module only to test the MTZ parsing;
+// its scanning and importing helpers are called by the Android runtime.
+#[cfg_attr(not(target_os = "android"), allow(dead_code))]
 mod themes;
 #[cfg(target_os = "android")]
 mod ui;
