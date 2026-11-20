@@ -1,0 +1,70 @@
+[device]
+codename = "dipper"
+brand = "Xiaomi"
+model = "MI 8"
+ab = true
+soc = { hans = "骁龙®845 移动平台", hant = "Snapdragon® 845 行動平台", en = "Snapdragon® 845 Mobile Platform" }
+
+[display]
+# MI 8's AMOLED panel: 1080 x 2248 at 440 dpi (ro.sf.lcd_density).
+width = 1080
+height = 2248
+density = 440
+diagonal = 6.21
+
+[modules]
+# Android 10: the kernel modules live on the vendor partition; there is no
+# vendor_boot, vendor_dlkm or system_dlkm on this phone.
+sources = ["vendor"]
+
+# The firmware of the WLAN chip is on the modem partition, which the phone
+# mounts at /vendor/firmware_mnt and its own recovery leaves unmounted.
+[firmware]
+partition = "modem"
+
+# The persist partition, which the phone mounts at /mnt/vendor/persist and
+# its own recovery leaves unmounted. The WLAN's MAC address is there.
+[partitions]
+mounted = ["persist"]
+
+# WLAN: Qualcomm's WCN3990 on PCIe (bt_wcn3990 in the vendor's files), driven
+# by qca_cld3_wlan.ko from the vendor partition. Its settings come from
+# /vendor/etc/wifi/WCNSS_qcom_cfg.ini and its MAC address from persist.
+[wlan]
+modules = ["qca_cld3_wlan"]
+interface = "wlan0"
+supplicant = "/vendor/bin/hw/wpa_supplicant"
+libraries = ["/vendor/lib64", "/system/lib64"]
+service = "android.hardware.wifi.supplicant.ISupplicant/default"
+probe = "http://connect.rom.miui.com/generate_204"
+
+# The update server the stock updater of the Chinese system asks.
+[update]
+server = "https://update.miui.com/updates/miotaV3.php"
+
+# The stock build this recovery is made on: the Chinese MIUI 12.5 build
+# V12.5.2.0.QEACNXM of Android 10, whose full update package holds the
+# recovery partition the recovery is built on top of.
+[stock]
+version = "V12.5.2.0.QEACNXM"
+package = "https://bn.d.miui.com/V12.5.2.0.QEACNXM/miui_MI8_V12.5.2.0.QEACNXM_f5ec813d1c_10.0.zip"
+recovery = "263b80b2e60144879d0cf62d897d217f4c92d8290311ab9b635760d2266d5e63"
+
+# The partitions a backup of the baseband and EFS takes: the baseband's
+# settings, with the IMEI, and the sensors' calibration.
+[backup]
+efs = ["modemst1", "modemst2", "fsg", "fsc", "persist"]
+
+# Where the phone's own programs keep logs in the data partition.
+[wipe]
+logs = [
+    "/data/miuilog",
+    "/data/vendor/diag",
+    "/data/vendor/bsplog",
+    "/data/vendor/log",
+    "/data/vendor/ramdump",
+    "/data/vendor/ramdump_ssr",
+    "/data/vendor/ssrdump",
+    "/data/vendor/tombstones",
+    "/data/vendor/wlan_logs",
+]
