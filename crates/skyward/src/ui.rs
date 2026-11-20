@@ -12,6 +12,7 @@ use crate::secure;
 use crate::services;
 use crate::settings;
 use crate::systems;
+use crate::themes;
 use crate::updates;
 use crate::wipe::{self, Eraser, Step};
 use crate::wlan;
@@ -1124,6 +1125,8 @@ struct Pages<'a> {
     /// Where each frame shown is written as well.
     dump: Option<&'a Path>,
     app: App,
+    /// The theme path kept from an earlier start, to read once on arrival.
+    theme_to_load: Option<String>,
     info: skyward_info::DeviceInfo,
     unread: Untaken,
     fonts: Fonts,
@@ -1293,6 +1296,7 @@ impl<'a> Pages<'a> {
         let kept = settings::read()?;
         let locale = request.locale.as_deref().or(info.locale.as_deref());
         let named = locale.map(Lang::for_locale).transpose()?;
+        let theme_to_load = kept.settings().and_then(|s| s.theme.clone());
         app.take_settings(kept.settings(), named);
         let keeper = Keeper::new(&kept);
         skyward_sys::kmsg(&format!(
@@ -1379,9 +1383,10 @@ impl<'a> Pages<'a> {
             cfg,
             programs,
             dump,
-            app,
-            info,
-            unread,
+        app,
+        theme_to_load,
+        info,
+        unread,
             fonts,
             surface,
             screen,
@@ -2473,6 +2478,12 @@ impl Pages<'_> {
             // What the pages ask for in answer to the work done goes on
             // after it.
             let mut queue = VecDeque::from(effects);
+            // The theme kept from an earlier start is read once, as soon as
+            // the pages arrive, so its colours and glyphs are there on the
+            // first frame after this one.
+            if let Some(path) = self.theme_to_load.take() {
+                queue.push_front(Effect::ApplyTheme(path));
+            }
             while let Some(fx) = queue.pop_front() {
                 eprintln!("effect {fx:?}");
                 queue.extend(self.effect(fx, now)?);
@@ -2573,6 +2584,44 @@ impl Pages<'_> {
             }
             Effect::ReadDir(folder) => list(&mut self.app, folder)?,
             Effect::ReadPlace(place, folder) => list_place(&mut self.app, place, folder)?,
+            // The themes pages read what is in shared storage, and lay one
+            // over the pages when the owner picks it.
+            Effect::ScanThemes => {
+                let top = Path::new(skyward_crypto::data::SDCARD);
+                let found = themes::scan(top).map_err(|e| format!("{e:#}"));
+                self.app.set_themes(found);
+            }
+            Effect::ApplyTheme(path) => {
+                let pack = themes::read(Path::new(&path)).map_err(|e| format!("{e:#}"));
+                match pack {
+                    Ok(pack) => self.app.set_theme(Some(pack), now),
+                    Err(why) => {
+                        skyward_sys::kmsg(&format!("the theme at {path} did not read: {why}"))?;
+                        self.app.report(&why, now);
+                    }
+                }
+            }
+            Effect::ImportTheme(place, path) => {
+                let from = in_place(place, &path);
+                let result = themes::import(Path::new(skyward_crypto::data::SDCARD), &from).map_err(|e| format!("{e:#}"));
+                match result {
+                    Ok(into) => {
+                        self.app.report(&format!("已导入主题 {}", into.display()), now);
+                        let found = themes::scan(Path::new(skyward_crypto::data::SDCARD)).map_err(|e| format!("{e:#}"));
+                        self.app.set_themes(found);
+                    }
+                    Err(why) => self.app.report(&why, now),
+                }
+                self.app.theme_imported();
+            }
+            Effect::RememberTheme(path) => {
+                // Applying a theme already put it in `state.theme`, which
+                // the settings keeper reads; clearing it drops colours and
+                // glyphs and the path with them.
+                if path.is_none() {
+                    self.app.set_theme(None, now);
+                }
+            }
             Effect::Paste { op, path, into, clash } => self.paste(op, path, into, clash, now)?,
             Effect::Delete(path) => {
                 ensure!(self.worker.is_none(), "work on files is under way already");

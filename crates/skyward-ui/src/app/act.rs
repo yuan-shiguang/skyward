@@ -39,6 +39,26 @@ impl App {
                     self.refresh();
                 }
             }
+            Action::ScanThemes => {
+                self.state.themes = None;
+                self.refresh();
+                return vec![Effect::ScanThemes];
+            }
+            Action::PickTheme(i) => {
+                let found = match self.state.themes.as_ref() {
+                    Some(Ok(themes)) => themes,
+                    _ => return vec![],
+                };
+                let Some(pack) = found.get(i).cloned() else { return vec![] };
+                let path = pack.path.clone();
+                return vec![Effect::ApplyTheme(path.clone()), Effect::RememberTheme(Some(path))];
+            }
+            Action::ClearTheme => return vec![Effect::RememberTheme(None)],
+            Action::ImportTheme => {
+                self.state.importing_theme = true;
+                self.open(Screen::ChooseTheme(Place::Storage));
+                return self.arrive_at(Screen::ChooseTheme(Place::Storage));
+            }
             // The switch moves at once; the runtime then tells how the WLAN
             // came up, or went off.
             Action::Toggle(Switch::Wlan) => {
@@ -365,7 +385,10 @@ impl App {
             }
             Action::ChooseEntry(i) => {
                 let screen = self.screen();
-                let Screen::Choose(place) = screen else { unreachable!("only a place's folder is chosen in") };
+                let place = match screen {
+                    Screen::Choose(p) | Screen::ChooseTheme(p) => p,
+                    other => unreachable!("{other:?} lists no folder to choose from"),
+                };
                 let folder = self.state.folder(screen);
                 let entry = folder.entry(i).clone();
                 let path = folder.inside(&entry.name);
@@ -375,7 +398,14 @@ impl App {
                         self.state.folder_mut(screen).leave(scroll);
                         return vec![Effect::ReadPlace(place, path)];
                     }
-                    FileKind::File | FileKind::Link { folder: false, .. } => return self.install_file(place, path, entry.size, now),
+                    FileKind::File | FileKind::Link { folder: false, .. } => {
+                        if matches!(screen, Screen::ChooseTheme(_)) {
+                            self.state.importing_theme = true;
+                            self.leave(true);
+                            return vec![Effect::ImportTheme(place, path)];
+                        }
+                        return self.install_file(place, path, entry.size, now);
+                    }
                     FileKind::Special => unreachable!("a place lists no special files"),
                 }
             }
@@ -383,7 +413,7 @@ impl App {
                 let screen = self.screen();
                 if let Some(path) = self.state.folder(screen).ancestor(depth) {
                     return vec![match screen {
-                        Screen::Choose(place) => Effect::ReadPlace(place, path),
+                        Screen::Choose(place) | Screen::ChooseTheme(place) => Effect::ReadPlace(place, path),
                         _ => Effect::ReadDir(path),
                     }];
                 }

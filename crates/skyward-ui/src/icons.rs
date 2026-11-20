@@ -65,6 +65,9 @@ pub enum Icon {
     Battery,
     /// Two phones, the one behind showing round the one in front.
     Systems,
+    /// A paint brush on a warm tile, as the theme store draws its own; the
+    /// entry to the themes pages uses the icon the theme editor supplies.
+    Theme,
 }
 
 /// The stock icons' box: every outline here is laid out in it.
@@ -371,12 +374,27 @@ fn outline(icon: Icon) -> (&'static [Part], f32) {
         Icon::Wlan => (WLAN, 1.0),
         Icon::Battery => (BATTERY, 1.0),
         Icon::Systems => (SYSTEMS, 1.0),
+        // The theme store's brush is a PNG the editor supplies, not an
+        // outline; it is drawn as a bitmap in `glyph` below.
+        Icon::Theme => unreachable!("the theme icon is drawn as a bitmap"),
     }
 }
 
 /// Draw `icon`'s glyph in `ink`, filling a box `size` across centred on
-/// (`cx`, `cy`) as it fills its tile.
+/// (`cx`, `cy`) as it fills its tile. When the active theme replaces this
+/// glyph with a PNG, that is drawn in full colour instead.
 pub fn glyph(c: &mut Canvas, icon: Icon, cx: f32, cy: f32, size: f32, ink: Rgba) {
+    if icon == Icon::Theme {
+        let png = include_bytes!("../../../assets/com.miui.themestore.png");
+        if let Some(bitmap) = Bitmap::decode(png) {
+            bitmap.draw(c, cx, cy, size);
+        }
+        return;
+    }
+    if let Some(bitmap) = overridden(icon) {
+        bitmap.draw(c, cx, cy, size);
+        return;
+    }
     draw(c, Art::Glyph(icon), cx, cy, size, ink);
 }
 
@@ -385,8 +403,94 @@ pub fn glyph(c: &mut Canvas, icon: Icon, cx: f32, cy: f32, size: f32, ink: Rgba)
 pub fn tile(c: &mut Canvas, t: &Theme, x: f32, y: f32, color: Rgba, icon: Icon) {
     let s = t.m.icon;
     let (cx, cy) = (x + s / 2.0, y + s / 2.0);
+    // A full-colour PNG already carries its own tile; set it over the whole
+    // box rather than over a second tile with a white glyph on top.
+    if icon == Icon::Theme || overridden(icon).is_some() {
+        glyph(c, icon, cx, cy, s, Rgba::rgb(255, 255, 255));
+        return;
+    }
     draw(c, Art::Tile, cx, cy, s, color);
     glyph(c, icon, cx, cy, s, Rgba::rgb(255, 255, 255));
+}
+
+/// A decoded PNG the active theme draws in place of a built-in glyph.
+struct Bitmap {
+    side: u32,
+    pixels: Vec<Rgba>,
+}
+
+impl Bitmap {
+    /// Decode an RGBA or RGB PNG from the bytes a theme holds.
+    fn decode(bytes: &[u8]) -> Option<Self> {
+        let decoder = png::Decoder::new(bytes);
+        let mut reader = decoder.read_info().ok()?;
+        let mut raw = vec![0u8; reader.output_buffer_size()];
+        let info = reader.next_frame(&mut raw).ok()?;
+        if info.bit_depth != png::BitDepth::Eight {
+            return None;
+        }
+        let (side, count) = (info.width, info.width as usize * info.height as usize);
+        let pixels: Vec<Rgba> = match info.color_type {
+            png::ColorType::Rgba => raw[..info.buffer_size()]
+                .chunks_exact(4)
+                .take(count)
+                .map(|p| Rgba { r: p[0], g: p[1], b: p[2], a: p[3] })
+                .collect(),
+            png::ColorType::Rgb => raw[..info.buffer_size()]
+                .chunks_exact(3)
+                .take(count)
+                .map(|p| Rgba { r: p[0], g: p[1], b: p[2], a: 255 })
+                .collect(),
+            _ => return None,
+        };
+        (pixels.len() == count).then_some(Self { side, pixels })
+    }
+
+    /// Draw this bitmap into the box `size` across centred on (`cx`, `cy`),
+    /// nearest-neighbour scaled, only where the canvas is held.
+    fn draw(&self, c: &mut Canvas, cx: f32, cy: f32, size: f32) {
+        let (left, top) = ((cx - size / 2.0).round() as i32, (cy - size / 2.0).round() as i32);
+        let side = size.ceil() as i32;
+        let (rows, cols) = (c.held(), c.cols());
+        let (y0, y1) = (top.max(rows.start as i32), (top + side).min(rows.end as i32));
+        let (x0, x1) = (left.max(cols.start as i32), (left + side).min(cols.end as i32));
+        if y0 >= y1 || x0 >= x1 {
+            return;
+        }
+        for y in y0..y1 {
+            let sy = ((y - top) as u32 * self.side / side as u32).min(self.side - 1);
+            for x in x0..x1 {
+                let sx = ((x - left) as u32 * self.side / side as u32).min(self.side - 1);
+                let px = self.pixels[(sy * self.side + sx) as usize];
+                if px.a > 0 {
+                    c.blend(x, y, px, px.a as f32 / 255.0);
+                }
+            }
+        }
+    }
+}
+
+/// Glyphs the active theme replaces, keyed by the built-in icon they stand
+/// in for. A theme that names no drawable for an icon leaves it built-in.
+static OVERRIDDEN: Mutex<Vec<(Icon, Arc<Bitmap>)>> = Mutex::new(Vec::new());
+
+fn overridden(icon: Icon) -> Option<Arc<Bitmap>> {
+    let guard = OVERRIDDEN.lock().expect("no one panics holding the drawings");
+    guard.iter().find(|(i, _)| *i == icon).map(|(_, bitmap)| bitmap.clone())
+}
+
+/// Replace the glyphs named in `icons` with the PNGs a theme supplies, and
+/// give back how many decoded. PNGs that cannot be read are left out.
+pub fn set_overrides(icons: &[(Icon, Vec<u8>)]) -> usize {
+    let made: Vec<(Icon, Arc<Bitmap>)> = icons.iter().filter_map(|(icon, bytes)| Bitmap::decode(bytes).map(|b| (*icon, Arc::new(b)))).collect();
+    let count = made.len();
+    *OVERRIDDEN.lock().expect("no one panics holding the drawings") = made;
+    count
+}
+
+/// Drop the theme's glyphs so the built-in ones show again.
+pub fn clear_overrides() {
+    OVERRIDDEN.lock().expect("no one panics holding the drawings").clear();
 }
 
 /// What is drawn from outlines: a tile, or a glyph.

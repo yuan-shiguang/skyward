@@ -289,8 +289,9 @@ impl App {
             Screen::Slot | Screen::Reboot => vec![Effect::ReadSlots],
             Screen::Systems => vec![Effect::ReadSystems],
             Screen::Restore => vec![self.find_backups()],
+            Screen::Themes => vec![Effect::ScanThemes],
             Screen::Files => vec![Effect::ReadDir(self.state.files.path.clone())],
-            Screen::Choose(place) if self.state.place_open(place) => vec![Effect::ReadPlace(place, self.state.folder(s).path.clone())],
+            Screen::Choose(place) | Screen::ChooseTheme(place) if self.state.place_open(place) => vec![Effect::ReadPlace(place, self.state.folder(s).path.clone())],
             Screen::Search => {
                 self.state.search.clear();
                 self.state.layer = Layer::Letters;

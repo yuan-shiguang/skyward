@@ -198,6 +198,12 @@ pub(crate) fn installs(e: &FileRow) -> bool {
     named && matches!(e.kind, FileKind::File | FileKind::Link { folder: false, .. })
 }
 
+/// Whether a file is an MTZ theme, to choose one to import.
+fn mtz(e: &FileRow) -> bool {
+    let named = std::path::Path::new(&e.name).extension().is_some_and(|ext| ext.eq_ignore_ascii_case("mtz"));
+    named && matches!(e.kind, FileKind::File | FileKind::Link { folder: false, .. })
+}
+
 /// The last part of `path`, as the installing page names the file there.
 pub(super) fn file_name(path: &str) -> Option<String> {
     std::path::Path::new(path).file_name().map(|n| n.to_string_lossy().into_owned())
@@ -294,6 +300,20 @@ impl App {
     pub fn set_place(&mut self, place: Place, folder: String, files: Result<Vec<FileRow>, String>, listed: i64) {
         let files = files.map(|entries| entries.into_iter().filter(installable).collect());
         self.show_folder(Screen::Choose(place), folder, files, listed);
+    }
+
+    /// The runtime listed a folder of `place` to choose an MTZ theme in.
+    pub fn set_place_theme(&mut self, place: Place, folder: String, files: Result<Vec<FileRow>, String>, listed: i64) {
+        let files = files.map(|entries| {
+            entries
+                .into_iter()
+                .filter(|e| match e.kind {
+                    FileKind::Folder { .. } | FileKind::Link { folder: true, .. } => !e.name.starts_with('.'),
+                    _ => mtz(e),
+                })
+                .collect()
+        });
+        self.show_folder(Screen::ChooseTheme(place), folder, files, listed);
     }
 
     /// The runtime found the USB drive plugged in, shown or not, or found

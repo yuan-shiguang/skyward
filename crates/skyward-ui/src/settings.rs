@@ -37,6 +37,10 @@ pub struct Settings {
     /// names none, as fastboot's does.
     pub spoken: Option<String>,
     pub dark: bool,
+    /// The path of the MTZ theme applied to the pages, so it can be read
+    /// again on the next start.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub theme: Option<String>,
     /// The brightness slider's place, from 0 at its left end to 1.
     pub brightness: f32,
     /// How long the screen stays on with nothing touched, in seconds; 0
@@ -120,6 +124,7 @@ impl Settings {
             language: state.language_chosen.then(|| state.lang.tag().to_string()),
             spoken: Some(state.lang.tag().to_string()),
             dark: state.dark,
+            theme: state.theme.as_ref().map(|p| p.path.clone()),
             brightness: state.brightness,
             screen_off: SCREEN_OFF[state.screen_off].map_or(0, |ms| ms / 1000),
             time_zone: TIME_ZONES[state.time_zone].2.to_string(),
@@ -214,7 +219,7 @@ fn picked<const N: usize>(kept: &[String], all: &[&str; N]) -> [bool; N] {
 /// What the settings file held as the recovery started.
 #[derive(Debug, Clone, PartialEq)]
 pub enum Kept {
-    Settings(Settings),
+    Settings(Box<Settings>),
     /// No settings: no file, or one that does not read as settings.
     Nothing,
     /// Where the file is could not be read; it is left alone this time.
@@ -225,7 +230,7 @@ impl Kept {
     /// The settings the file held, if it held any.
     pub fn settings(&self) -> Option<&Settings> {
         match self {
-            Kept::Settings(settings) => Some(settings),
+            Kept::Settings(settings) => Some(settings.as_ref()),
             Kept::Nothing | Kept::Unreadable => None,
         }
     }
@@ -246,7 +251,7 @@ pub struct Keeper {
 impl Keeper {
     pub fn new(kept: &Kept) -> Keeper {
         let holds = match kept {
-            Kept::Settings(settings) => Some(Some(settings.clone())),
+            Kept::Settings(settings) => Some(Some((**settings).clone())),
             Kept::Nothing => Some(None),
             Kept::Unreadable => None,
         };
@@ -374,8 +379,9 @@ mod tests {
     }
 
     #[test]
+    #[allow(clippy::box_default)] // the box is the shape `Kept` needs, not a boxed temporary
     fn changed_settings_are_written_once_they_have_stood_for_a_moment() {
-        let mut keeper = Keeper::new(&Kept::Settings(Settings::default()));
+        let mut keeper = Keeper::new(&Kept::Settings(Box::new(Settings::default())));
         assert_eq!(keeper.due(Settings::default(), 0), None, "what the file holds is not written again");
         let dark = Settings { dark: true, ..Settings::default() };
         assert_eq!(keeper.due(dark.clone(), 1_000), None);

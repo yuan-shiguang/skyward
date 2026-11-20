@@ -32,7 +32,8 @@ skyward-backup = { path = "../skyward-backup" }
 skyward-binder = { path = "../skyward-binder" }
 skyward-crypto = { path = "../skyward-crypto" }
 skyward-files = { path = "../skyward-files" }
-zip = { version = "8.6.0", default-features = false }
+# MTZ themes are zips whose inner entries are deflated.
+zip = { version = "8.6.0", default-features = false, features = ["deflate-flate2-zlib-rs"] }
 libc = { workspace = true }
 procfs = { version = "0.18.0", default-features = false }
 skyward-ui = { path = "../skyward-ui" }

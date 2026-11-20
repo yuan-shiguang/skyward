@@ -12,6 +12,13 @@ pub struct State {
     /// start, where otherwise it is the one the system names.
     pub language_chosen: bool,
     pub dark: bool,
+    /// The MTZ theme applied to the pages, if any; its colours and glyphs
+    /// are laid over the built-in ones.
+    pub theme: Option<crate::custom_theme::ThemePack>,
+    /// The themes found on the phone, or why they could not be read.
+    pub themes: Option<Result<Vec<crate::custom_theme::ThemePack>, String>>,
+    /// Whether a theme is being imported; the pages say so while it is.
+    pub importing_theme: bool,
     pub brightness: f32,
     /// How long the screen stays on with nothing touched, by its place in
     /// [`SCREEN_OFF`].
@@ -189,6 +196,9 @@ impl Default for State {
             lang: Lang::Hans,
             language_chosen: false,
             dark: false,
+            theme: None,
+            themes: None,
+            importing_theme: false,
             brightness: SLIDER_START,
             // Two minutes.
             screen_off: 3,
@@ -284,8 +294,8 @@ impl State {
     pub fn folder(&self, screen: Screen) -> &Folder {
         match screen {
             Screen::Files => &self.files,
-            Screen::Choose(Place::Storage) => &self.storage,
-            Screen::Choose(Place::UsbDrive) => &self.drive,
+            Screen::Choose(Place::Storage) | Screen::ChooseTheme(Place::Storage) => &self.storage,
+            Screen::Choose(Place::UsbDrive) | Screen::ChooseTheme(Place::UsbDrive) => &self.drive,
             other => unreachable!("{other:?} lists no folder"),
         }
     }
@@ -293,8 +303,8 @@ impl State {
     pub(super) fn folder_mut(&mut self, screen: Screen) -> &mut Folder {
         match screen {
             Screen::Files => &mut self.files,
-            Screen::Choose(Place::Storage) => &mut self.storage,
-            Screen::Choose(Place::UsbDrive) => &mut self.drive,
+            Screen::Choose(Place::Storage) | Screen::ChooseTheme(Place::Storage) => &mut self.storage,
+            Screen::Choose(Place::UsbDrive) | Screen::ChooseTheme(Place::UsbDrive) => &mut self.drive,
             other => unreachable!("{other:?} lists no folder"),
         }
     }

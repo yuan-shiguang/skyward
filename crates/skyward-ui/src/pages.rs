@@ -109,6 +109,8 @@ pub fn render(screen: Screen, cx: &Ctx) -> Frame {
         Screen::WlanPassword => wlan_password(cx),
         Screen::WlanNetwork => wlan_network(cx),
         Screen::WlanAdd => wlan_add(cx),
+        Screen::Themes => themes(cx),
+        Screen::ChooseTheme(place) => choose_theme(cx, place),
     }
 }
 
@@ -175,6 +177,7 @@ const TIME_ZONE: Text = ["时区", "時區", "Time zone"];
 const LICENSE: Text = ["开源许可", "開放原始碼授權", "Open source licenses"];
 const FONTS: Text = ["界面字体", "介面字型", "UI fonts"];
 const DUAL_BOOT: Text = ["双系统", "雙系統", "Dual boot"];
+const THEMES: Text = ["主题", "主題", "Themes"];
 
 /// A canvas for a page `h` tall in the colour `bg`, holding the rows `cx`
 /// asks to be drawn.
@@ -371,11 +374,13 @@ pub fn settings(cx: &Ctx) -> Frame {
         out.push(Hit { rect: r, action: Action::Toggle(Switch::Vibrate) });
     }
     y = widgets::section(&mut c, t, f, vibration.bottom, l.pick(["通用", "一般", "General"]));
+    let theme_value = s.theme.as_ref().map(|p| p.name.clone()).unwrap_or_else(|| l.pick(["默认", "預設", "Default"]).to_string());
     let general = widgets::list(&mut c, t, f, y, &[
+        Row::new(l.pick(THEMES)).icon(PURPLE, Icon::Theme).trail(Trail::Value(&theme_value)),
         Row::new(l.pick(LANGUAGE)).icon(BLUE, Icon::Globe).trail(Trail::Value(l.name())),
         Row::new(l.pick(TIME_ZONE)).icon(ORANGE, Icon::Clock).trail(Trail::Value(l.pick(TIME_ZONES[s.time_zone].0))),
     ]);
-    out.extend(hits(&general.rows, &[Action::Open(Screen::Language), Action::Open(Screen::TimeZone)]));
+    out.extend(hits(&general.rows, &[Action::Open(Screen::Themes), Action::Open(Screen::Language), Action::Open(Screen::TimeZone)]));
     y = widgets::section(&mut c, t, f, general.bottom, "USB");
     let usb = widgets::list(&mut c, t, f, y, &[Row::new(l.pick(["文件传输", "檔案傳輸", "File transfer"])).icon(BLUE, Icon::Usb).trail(Trail::Switch(s.file_transfer))]);
     out.extend(hits(&usb.rows, &[Action::Toggle(Switch::FileTransfer)]));
@@ -402,6 +407,95 @@ pub fn settings(cx: &Ctx) -> Frame {
     let about = widgets::list(&mut c, t, f, y, &rows);
     out.extend(hits(&about.rows, &opens));
     Frame::new(t, fit(c, t, about.bottom), out, l.pick(SETTINGS), top)
+}
+
+/// The MTZ themes found on the phone, which one is applied, and where to
+/// import another from. Laid out as the stock settings pages are.
+pub fn themes(cx: &Ctx) -> Frame {
+    let (t, f, s, l) = (cx.t, cx.f, cx.state, cx.state.lang);
+    let mut c = long_page(cx);
+    let mut out = Vec::new();
+    let top = t.m.content_top;
+
+    let current = s.theme.as_ref().map(|p| p.name.as_str()).unwrap_or_else(|| l.pick(["默认主题", "預設主題", "Default theme"]));
+    let active = s.theme.as_ref().map(|p| p.path.as_str());
+    let y = widgets::section_first(&mut c, t, f, top, l.pick(["当前主题", "目前主題", "Current theme"]));
+    let mut rows = vec![Row::new(current).icon(PURPLE, Icon::Theme).trail(Trail::None)];
+    let mut actions: Vec<Action> = vec![Action::Unavailable("the current theme")];
+    if active.is_some() {
+        rows.push(Row::new(l.pick(["恢复默认", "還原預設", "Restore default"])).icon(BLUE, Icon::Restore));
+        actions.push(Action::ClearTheme);
+    }
+    let list = widgets::list(&mut c, t, f, y, &rows);
+    out.extend(hits(&list.rows, &actions));
+
+    let y = widgets::section(&mut c, t, f, list.bottom, l.pick(["已找到的主题", "找到的主題", "Themes found"]));
+    let note;
+    let found: &[crate::custom_theme::ThemePack] = match &s.themes {
+        Some(Ok(themes)) if !themes.is_empty() => themes,
+        Some(Ok(_)) => {
+            note = l.pick(["未找到主题。将 .mtz 文件放入内部存储后点按扫描。", "找不到主題。將 .mtz 檔案放入內部儲存空間後點按掃描。", "No themes found. Put .mtz files in internal storage, then scan."]);
+            let bottom = widgets::footnote(&mut c, t, f, y, note);
+            return theme_actions_page(cx, c, out, bottom);
+        }
+        Some(Err(why)) => {
+            note = why;
+            let bottom = widgets::footnote(&mut c, t, f, y, note);
+            return theme_actions_page(cx, c, out, bottom);
+        }
+        None => {
+            note = l.pick(["正在扫描主题…", "正在掃描主題…", "Scanning for themes…"]);
+            let bottom = widgets::footnote(&mut c, t, f, y, note);
+            return theme_actions_page(cx, c, out, bottom);
+        }
+    };
+    let rows: Vec<Row> = found
+        .iter()
+        .map(|pack| {
+            let sub = if pack.author.is_empty() { None } else { Some(pack.author.as_str()) };
+            let row = Row::new(&pack.name).icon(GREEN, Icon::Theme);
+            match sub {
+                Some(sub) => row.subtitle(sub).trail(Trail::Check(active == Some(pack.path.as_str()))),
+                None => row.trail(Trail::Check(active == Some(pack.path.as_str()))),
+            }
+        })
+        .collect();
+    let picks: Vec<Action> = (0..found.len()).map(Action::PickTheme).collect();
+    let found_list = widgets::list(&mut c, t, f, y, &rows);
+    out.extend(hits(&found_list.rows, &picks));
+    theme_actions_page(cx, c, out, found_list.bottom)
+}
+
+/// The scan and import rows common to every state of the themes page.
+fn theme_actions_page(cx: &Ctx, mut c: Canvas, mut out: Vec<Hit>, bottom: f32) -> Frame {
+    let (t, f, l) = (cx.t, cx.f, cx.state.lang);
+    let y = widgets::section(&mut c, t, f, bottom, l.pick(["操作", "操作", "Actions"]));
+    let scan = Row::new(l.pick(["扫描主题", "掃描主題", "Scan themes"])).icon(BLUE, Icon::Restore);
+    let import = Row::new(l.pick(["从存储导入", "從儲存空間匯入", "Import from storage"])).icon(GREEN, Icon::Folder);
+    let actions = widgets::list(&mut c, t, f, y, &[scan, import]);
+    out.extend(hits(&actions.rows, &[Action::ScanThemes, Action::ImportTheme]));
+    let note = l.pick([
+        "主题为小米 MTZ 格式，应用后界面的颜色和图标将随主题改变，布局保持不变。",
+        "主題為小米 MTZ 格式，套用後介面的顏色和圖示將隨主題改變，版面保持不變。",
+        "Themes are Xiaomi MTZ packages; applying one changes the interface's colours and icons while keeping the layout.",
+    ]);
+    let bottom = widgets::footnote(&mut c, t, f, actions.bottom, note);
+    Frame::new(t, fit(c, t, bottom), out, l.pick(THEMES), cx.t.m.content_top)
+}
+
+/// A place's folders and the MTZ files in them, to import one.
+pub fn choose_theme(cx: &Ctx, place: Place) -> Frame {
+    let (s, l) = (cx.state, cx.state.lang);
+    let empty = l.pick(["暂无 MTZ 主题", "沒有 MTZ 主題", "No MTZ themes here"]);
+    listing(
+        cx,
+        s.folder(Screen::ChooseTheme(place)),
+        place_name(l, place),
+        None,
+        empty,
+        Action::ChooseEntry,
+        l.pick(["选择主题", "選擇主題", "Choose a theme"]),
+    )
 }
 
 /// What the settings page says beside its Skyward update entry: an update

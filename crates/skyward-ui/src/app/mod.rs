@@ -57,6 +57,7 @@ mod systems;
 mod terminal;
 #[cfg(test)]
 mod testing;
+mod themes;
 mod update;
 mod wipe;
 mod wlan;
@@ -186,6 +187,10 @@ pub enum Screen {
     /// A network added by hand: its name, how it is protected and its
     /// password, typed on the screen's keyboard.
     WlanAdd,
+    /// The MTZ themes found on the phone, to apply one to the pages.
+    Themes,
+    /// A place's folders and the `.mtz` files in them, to import one.
+    ChooseTheme(Place),
 }
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -382,6 +387,14 @@ pub enum Action {
     UpdateSkyward,
     /// Stop downloading the build.
     StopSkywardUpdate,
+    /// Look for MTZ themes on the phone again.
+    ScanThemes,
+    /// Apply the theme at this place in the list of those found.
+    PickTheme(usize),
+    /// Go back to the built-in colours and glyphs.
+    ClearTheme,
+    /// Import the MTZ chosen in the file manager.
+    ImportTheme,
     /// A control whose work is not wired up yet; touching it says so.
     Unavailable(&'static str),
 }
@@ -589,6 +602,17 @@ pub enum Effect {
     /// Merge the update that waits in the slot the phone runs from,
     /// telling how it goes with [`App::set_update`].
     Merge,
+    /// Look for `.mtz` themes in the places shared storage keeps them,
+    /// telling what is found with [`App::set_themes`].
+    ScanThemes,
+    /// Copy the `.mtz` at `path` from `place` into the themes folder, telling
+    /// how it went with [`App::theme_imported`] and looking for themes again.
+    ImportTheme(Place, String),
+    /// Read the theme at this path and lay its colours and glyphs over the
+    /// pages, telling them with [`App::set_theme`].
+    ApplyTheme(String),
+    /// Remember the theme at this path across starts.
+    RememberTheme(Option<String>),
 }
 
 enum Drag {
@@ -1269,11 +1293,15 @@ impl App {
     }
 
     pub fn theme(&self) -> Theme {
-        if self.state.dark {
+        let mut t = if self.state.dark {
             Theme::dark(self.w, self.h, self.px_per_dp)
         } else {
             Theme::light(self.w, self.h, self.px_per_dp)
+        };
+        if let Some(pack) = &self.state.theme {
+            pack.apply(&mut t.pal);
         }
+        t
     }
 
     pub fn screen(&self) -> Screen {

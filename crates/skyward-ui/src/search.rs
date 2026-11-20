@@ -66,6 +66,7 @@ pub const ENTRIES: &[Entry] = &[
         &["xitonggengxin", "xtgx", "hebing", "hb", "xiazai", "xz", "wanzhenggengxinbao", "wzgxb", "update", "ota", "merge", "snapshot", "download"],
     ),
     entry(SETTINGS, HOME, Screen::Settings, &["shezhi", "sz", "settings"]),
+    entry(["主题", "主題", "Themes"], SETTINGS, Screen::Themes, &["zhuti", "zt", "theme", "mtz", "huanfu", "hf", "skinning"]),
     entry(["深色模式", "深色模式", "Dark mode"], SETTINGS, Screen::Settings, &["shensemoshi", "ssms", "dark", "theme"]),
     entry(["屏幕亮度", "螢幕亮度", "Screen brightness"], SETTINGS, Screen::Settings, &["pingmuliangdu", "pmld", "liangdu", "ld", "brightness"]),
     entry(["息屏时间", "螢幕自動關閉", "Screen timeout"], SETTINGS, Screen::ScreenOff, &["xipingshijian", "xpsj", "timeout"]),

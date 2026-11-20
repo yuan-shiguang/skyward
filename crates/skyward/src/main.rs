@@ -37,6 +37,8 @@ mod services;
 mod settings;
 #[cfg(target_os = "android")]
 mod systems;
+#[cfg(any(target_os = "android", test))]
+mod themes;
 #[cfg(target_os = "android")]
 mod ui;
 #[cfg(target_os = "android")]
